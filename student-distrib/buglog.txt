@@ -1,0 +1,163 @@
+
+*********************************************************CHECKPOINT 3.1*********************************************************
+----------------------------------------------------IDT--------------------------------------------------------------
+1.elegent way failed:
+description: we tried to use the elegent way for producing the exeptions and interrupts for the IDT part. But the funtion is not worked bc C styles
+sol: Using the C linkage for each situations and handle all connection in the assambly code 
+
+2. Rebooting again and again 
+description: this is becasue of the tripple fault 
+sol: replaing the part of loadng IGT from IDT.h directly into the boot.s 
+
+----------------------------------------------------RTC--------------------------------------------------------------
+no for checkpoint 1
+----------------------------------------------------Keyboard--------------------------------------------------------------
+1. uselessf function for printing 1
+description: when printing 1, the keyboard is not worked
+sol: wrong implementation of scan code which should be 2
+
+2. Keyboard produce more than one character to the screen when pressing a button
+sol: This is due to ignorance of key-released scancode. These scancode are usually greater than 0x44, so I add an if-statement to ignore than when printing.
+
+3. Unable to use CapsLock
+description: CapsLock wasn't set as toggle button, so the state won't hold until we press capsloc again
+sol:Use if statement to make the capslock to toggle setting, differentiated from shift and ctrl.
+----------------------------------------------------PAGING--------------------------------------------------------------
+1. Miss Understanding of the address for PTE of Video mem
+description: the system start Rebooting again after adding the paging.
+sol: we correct the address for paging which is first obtain the middle 10 valus of the virtual mem and then left shift 12 to receive the actual value
+----------------------------------------------------TESTCASE--------------------------------------------------------------
+1. pointer checkstyle error 
+description: there is a warning in the test error about the pointer type 
+int dereference_fault_test_1() {
+	TEST_HEADER;
+	int j;
+	printf("Dereference address above video mem");
+	int* i = 0x00;
+	j = *i;
+	return FAIL;
+}
+sol: the code above has a warning since we need to define the int type pointer for i: thus line 25 to "int* i = (*int) 0x00;"
+
+*********************************************************CHECKPOINT 3.2*********************************************************
+----------------------------------------------------Terminal--------------------------------------------------------------
+1. backspace will delete stuff when keyboard buffer is emty
+description: when inputing nothing, backspace will still work and erase on screen
+sol: ban the backspace handler when keyboard buffer is empty
+
+2. backspace will leave a · when erase make, and cursor won't update
+sol: learned the format from putc, but change the currX and currY before the erase action instead of using currX-1 when manipulating video mem.
+
+3. CapsLock can't work together with shift
+description: when capslock is on, char from number won't be printed
+sol:give additional logic when deciding which scancode table should be used
+
+4. the result of test and the input words are note in a same position
+description: chars printed on top of screen, but the result printed on the bottom, sometimes they cover one another 
+sol: defined new terminal_putc, terminal_puts, terminal_printf based on the template in their original form.
+
+----------------------------------------------------File System--------------------------------------------------------------
+1. dir_read print wrong entry for large file with the smiling face in the end 
+description: when printing for the test case, didnot use the buf as the filename for printing but directly obtained through entry-> filename struct this is wrong since it did not 
+check the length of filename yet
+sol: change to bug instead of directly using filename
+2. edge case for read_dentry_by_index 
+description: did not check for when the is it reaching to the end of directory entry
+sol: add the edge case as below:
+'''
+    if (read_dentry_by_index(dir_idx, &curr_entry) == -1) { //read the current dentry into curr_entry
+        return 0;
+     }
+'''
+3. read_data helper function wrong calculation of address of each data block 
+description: the test case show page fault exeptions when testing this function
+sol: 
+'''
+data_block* cur_data_block = (data_block*)bootblock_start + (bootblock_start->inodes_num + 1) + cur_node->data_block_num[block_idx];
+'''
+we use bootblock_start as the staring address of the boot block and pass througb all the inode and then locate to the correct block using block idx and cur_node information
+----------------------------------------------------RTC--------------------------------------------------------------
+1. Wrong set up for helper function setup_frequency 
+description: no matter how to change the value of rtc frequency, the printing rate is the same in the QEMU screen
+sol: wrong calculation of updated frequency without using frequency as argument 
+
+----------------------------------------------------TESTCASE--------------------------------------------------------------
+1. text overlaping
+description: When reading binary files and display on the screen, the text won't change line and will overlap.
+sol: Use the terminal_printf instead of printf to enable printing with line changing
+int read_pingpong(){
+	TEST_HEADER;
+	// Print the ls file to the screen
+	uint32_t i;
+	uint32_t count;
+	int8_t buf[5500];
+	fs_open((uint8_t *)"pingpong");
+	count = fs_read(0, buf, 5500);
+	for (i = 0; i < count; i++) {
+		terminal_printf("%c", buf[i]);
+	}
+	fs_close(0);
+	terminal_printf("\n");
+	
+	return PASS;
+}
+2. text display with wierd background
+description: When reading files and display on the screen, the background has some wierd content
+sol: clear and reset the screen before print out the data in the file
+
+*********************************************************CHECKPOINT 3.3*********************************************************
+1. General Protection fault
+description: the general protection fault raised when a systemcall is raised
+sol: set the dpl of the system call entry in IDT to level 3, which is accessible from user program
+		if (i == SYSTEMCALL) {
+            idt[i].dpl = 3;
+            idt[i].reserved3 = 1; 
+        }
+
+2. Page fault
+description: the page fault is raised when system_execute is called
+sol: do not restore eax in systemcall handler, becuase the eax is the return value. Use the callee save
+	instead of pushal
+
+3. Page fault
+description: when execute shell, the ECE391OS> does not show up
+sol: systemcall_write is incorrect. we need to check whether the fd is valid or nor
+
+
+4. No print out when entering shell
+description: when jump into shell, there's no "391os>" displayed
+sol: the filedescriptor nullcheck range was wrong. We checked if the fd is less than 2 or greater than 7, however, the stdout should be 1. So we modified that to (0, 7), and things can be printed
+
+
+5. *** iret page fault in halt
+description: when we jump to syscall handler from halt and execute iret, page fault happened
+sol: the paging setup was wrong. we set bit 32-22 in idt before, but it should be 32-12 for user program page (4kb). This takes us more than 15 hours to debug, damn.
+
+
+5. keyboard clean issue
+description: when we use ctrl+l to clean the screen, whenever we push 'l', the screen will be cleared, and there's no 391os> printed
+sol: initialize the keyboard functional key flags whenever clear the screen, add couple of code to print 391os> and current keyboard buffer to the screen afterwards
+
+*********************************************************CHECKPOINT 3.4*********************************************************
+1. Comment's argument can't be extract correctly
+description: comment's filename can be read, but we can't load any later arguments that pass to the executable file
+sol: instead of copying characters one by one in the while loop to get the argument, we straight used a strcpy() function, which will ignore the null characters.
+
+
+*********************************************************CHECKPOINT 3.5*********************************************************
+1. Synchonization problem
+description: keyboard and PIT are disabled when go back to user space
+sol: restore interrupt flag (sti) before iret instead of after iret 
+
+2. User program will be called twice
+description: based on GDB observation, sometimes a single user program (e.g. "fish") will be called twice
+sol: We modified the extraction of keyboardbuffer. Previously we extract from 'curr_kid', but we fixed it to 'curr_rid'
+
+3. lack of pitflag 
+description: after initializing the first three shell, if creating a new PCB, it will mistakenly allocating to different places.
+sol: using a pitflag to differentizate two situation for initilizing the PCB in the systemcall execute function. When dealing with the first three shells, set pit flag to 1 inorder
+to match pcb's parent to be curr_PCB[curr_rid], otherwise match pab's parent to be curr_PCB[curr_kid]
+
+4. paging falt when close the video page in system_halt()
+description: after each halt, pagefault exception will raise.
+sol: In clear_video_page() function, we fixed the clearing page in table video_mem[]. It was originally the kernel pte, so pagefault happens each time
